@@ -1,0 +1,24 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+dev-dist/
+
+# Environment (never commit secrets)
+.env
+.env.local
+.env.*.local
+
+# Logs and caches
+*.log
+npm-debug.log*
+.vite/
+.DS_Store
+Thumbs.db
+
+# Editor
+.idea/
+.vscode/
+*.swp
+*.swo
