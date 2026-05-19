@@ -322,6 +322,43 @@ select:focus {
 .compact-list .transaction-item:nth-child(n + 5) { display: none; }
 
 .two-fields { display: grid; gap: 12px; }
+
+.emoji-categories {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  margin-top: 4px;
+}
+.emoji-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 12px 8px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: #0a1211;
+  color: var(--muted);
+  font-size: 0.75rem;
+  transition: all 0.15s ease;
+}
+.emoji-btn:hover {
+  border-color: var(--teal);
+  color: var(--text);
+}
+.emoji-btn.active {
+  border-color: var(--teal);
+  background: rgba(77, 213, 195, 0.12);
+  color: var(--teal);
+}
+.emoji-icon {
+  font-size: 1.4rem;
+  line-height: 1;
+}
+.emoji-label {
+  font-weight: 600;
+}
+
 .button-row { display: flex; flex-wrap: wrap; gap: 10px; }
 .space-code {
   margin: 12px 0;

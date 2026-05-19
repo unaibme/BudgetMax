@@ -601,15 +601,31 @@ function TransactionList({ items, loading, onDelete, compact = false }) {
 function AddModal({ onClose, onAdd }) {
   const [type, setType] = useState('expense')
   const [amount, setAmount] = useState('')
-  const [category, setCategory] = useState(expenseCategories[0])
+  const [category, setCategory] = useState('Food')
   const [note, setNote] = useState('')
   const [txDate, setTxDate] = useState(today)
   const [busy, setBusy] = useState(false)
-  const categories = type === 'income' ? incomeCategories : expenseCategories
+  const expenseCategoryEmojis = [
+    { name: 'Food', emoji: '🍕' },
+    { name: 'Transport', emoji: '🚗' },
+    { name: 'Bills', emoji: '🧾' },
+    { name: 'Shopping', emoji: '🛍️' },
+    { name: 'Health', emoji: '💊' },
+    { name: 'Savings', emoji: '💰' }
+  ]
+  const incomeCategoryEmojis = [
+    { name: 'Salary', emoji: '💼' },
+    { name: 'Freelance', emoji: '💻' },
+    { name: 'Business', emoji: '📈' },
+    { name: 'Gift', emoji: '🎁' },
+    { name: 'Investment', emoji: '📊' },
+    { name: 'Other Income', emoji: '💵' }
+  ]
+  const categories = type === 'income' ? incomeCategoryEmojis : expenseCategoryEmojis
 
   function handleTypeChange(nextType) {
     setType(nextType)
-    setCategory(nextType === 'income' ? incomeCategories[0] : expenseCategories[0])
+    setCategory(nextType === 'income' ? incomeCategoryEmojis[0].name : expenseCategoryEmojis[0].name)
   }
 
   async function handleSubmit(event) {
@@ -647,13 +663,22 @@ function AddModal({ onClose, onAdd }) {
             <input type="number" inputMode="decimal" value={amount} onChange={(event) => setAmount(event.target.value)} placeholder="e.g. 1500" min="1" autoFocus required />
           </label>
 
+          <div className="emoji-categories">
+            {categories.map((item) => (
+              <button
+                key={item.name}
+                type="button"
+                className={`emoji-btn ${category === item.name ? 'active' : ''}`}
+                onClick={() => setCategory(item.name)}
+                aria-label={item.name}
+              >
+                <span className="emoji-icon">{item.emoji}</span>
+                <span className="emoji-label">{item.name}</span>
+              </button>
+            ))}
+          </div>
+
           <div className="two-fields">
-            <label>
-              Category
-              <select value={category} onChange={(event) => setCategory(event.target.value)}>
-                {categories.map((item) => <option key={item}>{item}</option>)}
-              </select>
-            </label>
             <label>
               Date
               <input type="date" value={txDate} onChange={(event) => setTxDate(event.target.value)} required />

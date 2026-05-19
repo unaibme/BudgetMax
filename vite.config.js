@@ -7,7 +7,14 @@ export default defineConfig({
     react(),
     VitePWA({
       registerType: 'autoUpdate',
-      includeAssets: ['pwa-192.png', 'pwa-512.png'],
+      includeAssets: [
+        'favicon.ico',
+        'favicon-16x16.png',
+        'favicon-32x32.png',
+        'apple-touch-icon.png',
+        'pwa-192.png',
+        'pwa-512.png'
+      ],
       manifest: {
         name: 'PKR Budget Tracker',
         short_name: 'PKR Budget',
@@ -17,7 +24,7 @@ export default defineConfig({
         display: 'standalone',
         orientation: 'any',
         background_color: '#070d0c',
-        theme_color: '#070d0c',
+        theme_color: '#4dd5c3',
         icons: [
           {
             src: '/pwa-192.png',
