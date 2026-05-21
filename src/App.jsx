@@ -68,6 +68,22 @@ function getInitialSpaceId() {
   return next
 }
 
+const QUEUE_KEY = 'pkr-budget-sync-queue'
+
+function getQueue() {
+  return readJson(QUEUE_KEY, [])
+}
+
+function writeQueue(q) {
+  writeJson(QUEUE_KEY, q)
+}
+
+function appendToQueue(action) {
+  const q = getQueue()
+  q.push(action)
+  writeQueue(q)
+}
+
 export default function App() {
   const [spaceId, setSpaceId] = useState(getInitialSpaceId)
   const [transactions, setTransactions] = useState([])
@@ -79,6 +95,7 @@ export default function App() {
   const [syncText, setSyncText] = useState(isSupabaseConfigured ? 'Syncing...' : 'Local mode')
   const [filter, setFilter] = useState('all')
   const [showAdd, setShowAdd] = useState(false)
+  const [isOnline, setIsOnline] = useState(navigator.onLine)
 
   const cacheKey = `pkr-budget-cache:${spaceId}:${selectedMonth}`
   const settingsKey = `pkr-budget-settings:${spaceId}`
@@ -166,6 +183,71 @@ export default function App() {
     loadDataRef.current = loadData
   }, [loadData])
 
+  const processOfflineQueue = useCallback(async () => {
+    if (!isSupabaseConfigured || !navigator.onLine) return
+    const queue = getQueue()
+    if (!queue.length) return
+
+    setSyncText('Syncing offline data...')
+    const client = await getSupabaseClient()
+    let hasChanges = false
+    const newQueue = []
+
+    for (const action of queue) {
+      if (action.type === 'insert_transaction') {
+        const { error } = await client.from('transactions').insert(action.payload)
+        if (error) {
+          newQueue.push(action)
+        } else {
+          hasChanges = true
+        }
+      } else if (action.type === 'delete_transaction') {
+        const { error } = await client.from('transactions').delete().eq('id', action.id).eq('budget_id', action.spaceId)
+        if (error) {
+          newQueue.push(action)
+        } else {
+          hasChanges = true
+        }
+      } else if (action.type === 'update_budget') {
+        const { error } = await client.from('budget_settings').upsert({ budget_id: action.spaceId, monthly_budget: action.amount })
+        if (error) {
+          newQueue.push(action)
+        } else {
+          hasChanges = true
+        }
+      }
+    }
+
+    writeQueue(newQueue)
+    if (hasChanges) {
+      loadDataRef.current({ silent: true })
+    } else {
+      setSyncText(`Synced ${new Date().toLocaleTimeString('en-PK', { hour: '2-digit', minute: '2-digit' })}`)
+    }
+  }, [])
+
+  useEffect(() => {
+    function handleOnline() {
+      setIsOnline(true)
+      processOfflineQueue()
+    }
+    function handleOffline() {
+      setIsOnline(false)
+      setSyncText('Offline (Saved locally)')
+    }
+    window.addEventListener('online', handleOnline)
+    window.addEventListener('offline', handleOffline)
+    
+    if (navigator.onLine) {
+      processOfflineQueue()
+    }
+
+    return () => {
+      window.removeEventListener('online', handleOnline)
+      window.removeEventListener('offline', handleOffline)
+    }
+  }, [processOfflineQueue])
+
   useEffect(() => {
     if (!isSupabaseConfigured) return undefined
 
@@ -231,41 +313,67 @@ export default function App() {
     setTransactions((items) => [optimisticItem, ...items])
     setShowAdd(false)
 
+    const nextTransactions = [optimisticItem, ...transactions]
+    writeJson(cacheKey, { transactions: nextTransactions, savedAt: Date.now() })
+
     if (!isSupabaseConfigured) {
-      const next = [optimisticItem, ...transactions]
-      writeJson(cacheKey, { transactions: next, savedAt: Date.now() })
       setSyncText('Saved locally')
       return true
     }
 
-    const client = await getSupabaseClient()
-    const { error: insertError } = await client.from('transactions').insert({
+    const insertPayload = {
       budget_id: spaceId,
       type: payload.type,
       amount: Number(payload.amount),
       category: payload.category,
       note: payload.note,
       tx_date: payload.tx_date
-    })
-
-    if (insertError) {
-      setTransactions((items) => items.filter((item) => item.id !== optimisticId))
-      setError(insertError.message)
-      return false
     }
 
-    loadData({ silent: true })
+    if (!isOnline) {
+      appendToQueue({ type: 'insert_transaction', tempId: optimisticId, payload: insertPayload })
+      setSyncText('Saved offline')
+      return true
+    }
+
+    const client = await getSupabaseClient()
+    const { error: insertError } = await client.from('transactions').insert(insertPayload)
+
+    if (insertError) {
+      appendToQueue({ type: 'insert_transaction', tempId: optimisticId, payload: insertPayload })
+      setSyncText('Saved offline (Network issue)')
+      return true
+    }
+
+    loadDataRef.current({ silent: true })
     return true
   }
 
   async function deleteTransaction(id) {
-    const beforeDelete = transactions
     const next = transactions.filter((item) => item.id !== id)
     setTransactions(next)
+    writeJson(cacheKey, { transactions: next, savedAt: Date.now() })
 
-    if (!isSupabaseConfigured || String(id).startsWith('temp-')) {
-      writeJson(cacheKey, { transactions: next, savedAt: Date.now() })
+    if (!isSupabaseConfigured) {
       setSyncText('Saved locally')
+      return
+    }
+
+    if (!isOnline) {
+      if (String(id).startsWith('temp-')) {
+        const q = getQueue().filter(action => !(action.type === 'insert_transaction' && action.tempId === id))
+        writeQueue(q)
+      } else {
+        appendToQueue({ type: 'delete_transaction', id, spaceId })
+      }
+      setSyncText('Deleted offline')
+      return
+    }
+
+    if (String(id).startsWith('temp-')) {
+      const q = getQueue().filter(action => !(action.type === 'insert_transaction' && action.tempId === id))
+      writeQueue(q)
+      setSyncText('Deleted offline')
       return
     }
 
@@ -277,12 +385,12 @@ export default function App() {
       .eq('budget_id', spaceId)
 
     if (deleteError) {
-      setTransactions(beforeDelete)
-      setError(deleteError.message)
+      appendToQueue({ type: 'delete_transaction', id, spaceId })
+      setSyncText('Deleted offline (Network issue)')
       return
     }
 
-    loadData({ silent: true })
+    loadDataRef.current({ silent: true })
   }
 
   async function saveBudget(value) {
@@ -295,6 +403,12 @@ export default function App() {
       return
     }
 
+    if (!isOnline) {
+      appendToQueue({ type: 'update_budget', spaceId, amount })
+      setSyncText('Saved offline')
+      return
+    }
+
     setSyncText('Saving...')
     const client = await getSupabaseClient()
     const { error: settingsError } = await client
@@ -302,13 +416,13 @@ export default function App() {
       .upsert({ budget_id: spaceId, monthly_budget: amount })
 
     if (settingsError) {
-      setError(settingsError.message)
-      setSyncText('Could not save budget')
+      appendToQueue({ type: 'update_budget', spaceId, amount })
+      setSyncText('Saved offline (Network issue)')
       return
     }
 
     setSyncText('Budget saved')
-    loadData({ silent: true })
+    loadDataRef.current({ silent: true })
   }
 
   function switchSpace(nextValue) {
