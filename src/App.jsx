@@ -1,8 +1,8 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState, useRef } from 'react'
 import { getSupabaseClient, isSupabaseConfigured } from './lib/supabase.js'
 
 const incomeCategories = ['Salary', 'Freelance', 'Business', 'Gift', 'Investment', 'Other Income']
-const expenseCategories = ['Food', 'Transport', 'Bills', 'Rent', 'Shopping', 'Health', 'Education', 'Family', 'Savings', 'Other Expense']
+const expenseCategories = ['Food', 'Transport', 'Bills', 'Rent', 'Shopping', 'Health', 'Education', 'Family', 'Subscriptions', 'Other Expense']
 const today = new Date().toISOString().slice(0, 10)
 const currentMonth = today.slice(0, 7)
 const defaultBudget = 50000
@@ -161,6 +161,11 @@ export default function App() {
     }
   }, [cacheKey, loadData, settingsKey])
 
+  const loadDataRef = useRef(loadData)
+  useEffect(() => {
+    loadDataRef.current = loadData
+  }, [loadData])
+
   useEffect(() => {
     if (!isSupabaseConfigured) return undefined
 
@@ -172,10 +177,10 @@ export default function App() {
       channel = client
         .channel(`budget-space-${spaceId}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'transactions', filter: `budget_id=eq.${spaceId}` }, () => {
-        loadData({ silent: true })
+        loadDataRef.current({ silent: true })
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'budget_settings', filter: `budget_id=eq.${spaceId}` }, () => {
-        loadData({ silent: true })
+        loadDataRef.current({ silent: true })
       })
         .subscribe()
     })
@@ -186,7 +191,7 @@ export default function App() {
         if (client && channel) client.removeChannel(channel)
       })
     }
-  }, [loadData, spaceId])
+  }, [spaceId])
 
   const stats = useMemo(() => {
     const income = transactions.filter((item) => item.type === 'income').reduce((sum, item) => sum + cleanNumber(item.amount), 0)
@@ -611,7 +616,7 @@ function AddModal({ onClose, onAdd }) {
     { name: 'Bills', emoji: '🧾' },
     { name: 'Shopping', emoji: '🛍️' },
     { name: 'Health', emoji: '💊' },
-    { name: 'Savings', emoji: '💰' }
+    { name: 'Subscriptions', emoji: '📱' }
   ]
   const incomeCategoryEmojis = [
     { name: 'Salary', emoji: '💼' },

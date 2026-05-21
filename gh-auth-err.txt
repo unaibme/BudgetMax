@@ -1,0 +1,4 @@
+
+! First copy your one-time code: 07D0-047C
+Open this URL to continue in your web browser: https://github.com/login/device
+failed to authenticate via web browser: context deadline exceeded

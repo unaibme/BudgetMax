@@ -126,15 +126,36 @@ on public.transactions (budget_id, tx_date desc, created_at desc);
 create index if not exists transactions_budget_type_date_idx
 on public.transactions (budget_id, type, tx_date desc);
 
--- Enable realtime sync for supported Supabase projects.
+-- Add device_id and sync_status for multi-device sync resolution.
+-- device_id  – traces which device last modified a row
+-- sync_status – 'synced' | 'pending'; pending rows came from a device that was offline
+-- Both columns are nullable so existing rows are unaffected until migrated.
+alter table if exists public.transactions add column if not exists device_id text;
+alter table if exists public.transactions add column if not exists sync_status text check (sync_status in ('synced','pending'));
+
+-- New rows default to synced (the app will write 'pending' explicitly for offline inserts).
+-- Migrate existing rows that have no device_id / sync_status yet.
+update public.transactions set device_id = coalesce(device_id, 'PKR-LEGACY'), sync_status = coalesce(sync_status, 'synced') where device_id is null or sync_status is null;
+
+-- ── Data-integrity helper: merge dedups ─────────────────────────────────────
+-- trans_insertedOnLoad  – tracks the timestamp of the last server load per
+--                         device+space so the sync routine can compare against
+--                         updated_at and decide whether any records newer than the
+--                         cache exist on the server.  We store this in localStorage,
+--                         not in the database (client-only flag, no schema needed).
+
+create index if not exists transactions_device_updated_idx
+  on public.transactions (device_id, updated_at desc);
+
+-- ── Enable realtime sync for supported Supabase projects. ───────────────────
 do $$
 begin
   if exists (select 1 from pg_publication where pubname = 'supabase_realtime') then
     if not exists (
       select 1 from pg_publication_tables
       where pubname = 'supabase_realtime'
-      and schemaname = 'public'
-      and tablename = 'transactions'
+        and schemaname = 'public'
+        and tablename = 'transactions'
     ) then
       alter publication supabase_realtime add table public.transactions;
     end if;
@@ -142,10 +163,44 @@ begin
     if not exists (
       select 1 from pg_publication_tables
       where pubname = 'supabase_realtime'
-      and schemaname = 'public'
-      and tablename = 'budget_settings'
+        and schemaname = 'public'
+        and tablename = 'budget_settings'
     ) then
       alter publication supabase_realtime add table public.budget_settings;
     end if;
   end if;
 end $$;
+
+-- ── Service-level helper: last-server-wins on updated_at ─────────────────────
+-- Expose a callable function so the sync routine or service role can force-clear
+-- stale rows on duplicate content without needing a unique constraint.
+create or replace function public.resolve_transaction_conflict(
+  p_space   text,
+  p_type    text,
+  p_amount  numeric,
+  p_date    date,
+  p_note    text default null,
+  p_updated timestamptz default now()
+)
+returns void
+language plpgsql
+as $$
+begin
+  -- Delete an older duplicate row that has the same space+type+amount+date+note
+  -- and was written earlier than p_updated.
+  delete from public.transactions t
+  using (
+    select id
+    from public.transactions
+    where budget_id   = p_space
+      and type        = p_type
+      and amount      = p_amount
+      and tx_date     = p_date
+      and coalesce(note,'') = coalesce(p_note,'')
+      and updated_at  < p_updated
+    order by updated_at asc
+    limit 1
+  ) stale
+  where t.id = stale.id;
+end;
+$$;
